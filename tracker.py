@@ -2,7 +2,6 @@
 Multi-Object Tracking System using YOLOv8 and DeepSORT
 Displays live tracking results in video feed with object IDs
 """
-
 import cv2
 import time
 import logging
@@ -19,16 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class ObjectTracker:
-    """Multi-Object Tracker using YOLOv8 + DeepSORT"""
-    
     def __init__(self, model_name=YOLO_MODEL, confidence=CONFIDENCE_THRESHOLD):
-        """
-        Initialize tracker with YOLO model and DeepSORT
-        
-        Args:
-            model_name (str): YOLOv8 model name
-            confidence (float): Detection confidence threshold
-        """
         logger.info(f"Initializing ObjectTracker with model: {model_name}")
         
         # Lazy load YOLO to avoid slow import at startup
@@ -101,26 +91,14 @@ class ObjectTracker:
         logger.info(f"YOLO model ready with {len(self.class_names)} classes")
     
     def _load_deepsort(self):
-        """Initialize DeepSORT tracker"""
         logger.info("Initializing DeepSORT tracker")
         self.tracker = DeepSort(max_age=DEEPSORT_MAX_AGE, n_init=DEEPSORT_N_INIT)
         logger.info("DeepSORT tracker initialized")
     
     def _check_gui_available(self):
-        """Check if GUI display is available"""
-        # force GUI
         return True
     
     def detect_objects(self, frame):
-        """
-        Detect objects in frame using YOLOv8
-        
-        Args:
-            frame: Input frame
-            
-        Returns:
-            list: Detections in format [(bbox, conf, cls), ...]
-        """
         results = self.model(frame, conf=self.confidence)[0]
         detections = []
         
@@ -136,44 +114,15 @@ class ObjectTracker:
         return detections
     
     def update_tracks(self, detections, frame):
-        """
-        Update tracks with new detections
-        
-        Args:
-            detections: List of detections
-            frame: Current frame
-            
-        Returns:
-            list: Updated tracks
-        """
         tracks = self.tracker.update_tracks(detections, frame=frame)
         return tracks
     
     def select_roi(self, frame):
-        """
-        Allow user to select Region of Interest
-        
-        Args:
-            frame: Current frame
-            
-        Returns:
-            tuple: ROI coordinates (x, y, w, h)
-        """
         roi = cv2.selectROI("Object Tracking - Select Object", frame, False)
         logger.info(f"ROI selected: {roi}")
         return roi
     
     def draw_detections(self, frame, tracks):
-        """
-        Draw tracking results on frame
-        
-        Args:
-            frame: Input frame
-            tracks: List of tracked objects
-            
-        Returns:
-            frame: Annotated frame
-        """
         for track in tracks:
             if not track.is_confirmed():
                 continue
@@ -216,20 +165,10 @@ class ObjectTracker:
                 
                 cv2.putText(frame, text, (x1+5, y1-8),
                            cv2.FONT_HERSHEY_SIMPLEX, TEXT_FONT_SIZE,
-                           TEXT_COLOR, 2)
-        
+                           TEXT_COLOR, 2)       
         return frame
     
     def draw_info(self, frame):
-        """
-        Draw FPS and instructions on frame
-        
-        Args:
-            frame: Input frame
-            
-        Returns:
-            frame: Annotated frame
-        """
         # Draw FPS
         if SHOW_FPS:
             cv2.putText(frame, f"FPS: {int(self.fps)}",
@@ -249,14 +188,11 @@ class ObjectTracker:
         return frame
     
     def update_fps(self):
-        """Update FPS counter"""
         new_time = time.time()
         self.fps = 1 / (new_time - self.fps_time) if (new_time - self.fps_time) > 0 else 0
         self.fps_time = new_time
-
-
+        
 def main():
-    """Main tracking loop"""
     logger.info("Starting Object Tracker")
     
     # Initialize tracker
@@ -318,8 +254,7 @@ def main():
                 else:
                     logger.info("No objects detected, continuing...")
                     time.sleep(0.1)  # Brief pause
-                    continue
-            
+                    continue        
             continue
         
         # Detect objects
@@ -351,13 +286,10 @@ def main():
                 tracker.roi_center = None
                 tracker.tracker = DeepSort(max_age=DEEPSORT_MAX_AGE, n_init=DEEPSORT_N_INIT)
         else:
-            # No GUI - just log progress and check for quit signal
             if frame_count % 30 == 0:  # Log every 30 frames (~1 second at 30fps)
                 logger.info(f"Processing frame {frame_count} - Tracking {len(tracks)} objects")
-            
-            # Check for quit (can't use cv2.waitKey without GUI)
+                
             try:
-                # Non-blocking check for keyboard input (limited in headless mode)
                 import msvcrt
                 if msvcrt.kbhit():
                     key = msvcrt.getch()
@@ -371,7 +303,6 @@ def main():
                         tracker.roi_center = None
                         tracker.tracker = DeepSort(max_age=DEEPSORT_MAX_AGE, n_init=DEEPSORT_N_INIT)
             except ImportError:
-                # msvcrt not available on non-Windows
                 pass
     
     # Cleanup
