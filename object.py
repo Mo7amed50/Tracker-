@@ -28,10 +28,6 @@ while True:
 
     # Resize frame for speed
     frame = cv2.resize(frame, (960, 540))
-
-    # ----------------------------------------
-    # ROI SELECTION MODE
-    # ----------------------------------------
     if roi is None:
 
         cv2.putText(frame,
@@ -56,9 +52,6 @@ while True:
 
         continue
 
-    # ----------------------------------------
-    # YOLO DETECTION
-    # ----------------------------------------
     results = model(frame)[0]
 
     detections = []
@@ -71,9 +64,6 @@ while True:
 
         detections.append(([x1, y1, x2-x1, y2-y1], conf, cls))
 
-    # ----------------------------------------
-    # DEEPSORT TRACKING
-    # ----------------------------------------
     tracks = tracker.update_tracks(detections, frame=frame)
 
     for track in tracks:
@@ -116,9 +106,6 @@ while True:
                         (0,0,0),
                         2)
 
-    # ----------------------------------------
-    # FPS COUNTER
-    # ----------------------------------------
     new_time = time.time()
     fps = 1/(new_time - fps_time)
     fps_time = new_time
