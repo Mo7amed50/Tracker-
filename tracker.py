@@ -6,7 +6,7 @@ Displays live tracking results in video feed with object IDs
 import cv2
 import time
 import logging
-from ultralytics import YOLO
+import threading
 from deep_sort_realtime.deepsort_tracker import DeepSort
 from config import *
 
@@ -29,15 +29,24 @@ class ObjectTracker:
             model_name (str): YOLOv8 model name
             confidence (float): Detection confidence threshold
         """
-        logger.info(f"Loading YOLO model: {model_name}")
-        self.model = YOLO(model_name)
-        self.class_names = self.model.names
+        logger.info(f"Initializing ObjectTracker with model: {model_name}")
+        
+        # Lazy load YOLO to avoid slow import at startup
+        self.model = None
+        self.model_name = model_name
         self.confidence = confidence
+        self.class_names = None
         
-        logger.info("Initializing DeepSORT tracker")
-        self.tracker = DeepSort(max_age=DEEPSORT_MAX_AGE, n_init=DEEPSORT_N_INIT)
+        # Load YOLO model with timeout
+        self._load_yolo_model()
         
-        # Tracking state
+        # Initialize DeepSORT
+        self._load_deepsort()
+        
+        # Check GUI availability
+        self.gui_available = self._check_gui_available()
+        
+        logger.info("ObjectTracker initialized successfully")
         self.selected_track_id = None
         self.roi = None
         self.roi_center = None
@@ -45,6 +54,62 @@ class ObjectTracker:
         self.fps_time = time.time()
         
         logger.info("ObjectTracker initialized successfully")
+    
+    def _load_yolo_model(self):
+        """Load YOLO model with progress indication and timeout"""
+        logger.info(f"Loading YOLO model: {self.model_name} (this may take 30-60 seconds on first run)")
+        
+        # Use threading to load with timeout
+        result = [None]
+        exception = [None]
+        
+        def load_model():
+            try:
+                logger.info("Importing ultralytics (this is the slow part)...")
+                from ultralytics import YOLO
+                logger.info("Creating YOLO model...")
+                result[0] = YOLO(self.model_name)
+                logger.info("YOLO model loaded successfully")
+            except Exception as e:
+                exception[0] = e
+        
+        # Start loading in background
+        load_thread = threading.Thread(target=load_model, daemon=True)
+        load_thread.start()
+        
+        # Wait with progress indication
+        start_time = time.time()
+        timeout = 30  # 30 seconds timeout
+        
+        while load_thread.is_alive() and (time.time() - start_time) < timeout:
+            elapsed = time.time() - start_time
+            if elapsed > 5:  # Show progress after 5 seconds
+                logger.info(f"Loading YOLO model... ({int(elapsed)}s elapsed)")
+            time.sleep(1)  # Check every 1 second
+        
+        load_thread.join(timeout=1)  # Give it 1 more second
+        
+        if load_thread.is_alive():
+            raise TimeoutError(f"YOLO model loading timed out after {timeout} seconds. "
+                             "Try restarting or check your internet connection for model download.")
+        
+        if exception[0]:
+            raise exception[0]
+        
+        self.model = result[0]
+        self.class_names = self.model.names
+        logger.info(f"YOLO model ready with {len(self.class_names)} classes")
+    
+    def _load_deepsort(self):
+        """Initialize DeepSORT tracker"""
+        logger.info("Initializing DeepSORT tracker")
+        self.tracker = DeepSort(max_age=DEEPSORT_MAX_AGE, n_init=DEEPSORT_N_INIT)
+        logger.info("DeepSORT tracker initialized")
+    
+    def _check_gui_available(self):
+        """Check if GUI display is available"""
+        # force GUI
+        return True
     
     def detect_objects(self, frame):
         """
@@ -143,8 +208,11 @@ class ObjectTracker:
                 # Draw label text
                 text = f"{label} | ID:{track_id}"
                 if SHOW_CONFIDENCE:
-                    conf = track.det_conf if hasattr(track, 'det_conf') else 0.0
-                    text += f" | {conf:.2f}"
+                    conf = getattr(track, 'det_conf', None)
+                    if conf is not None:
+                        text += f" | {conf:.2f}"
+                    else:
+                        text += " | N/A"
                 
                 cv2.putText(frame, text, (x1+5, y1-8),
                            cv2.FONT_HERSHEY_SIMPLEX, TEXT_FONT_SIZE,
@@ -224,17 +292,33 @@ def main():
         
         # ROI Selection Mode
         if tracker.roi is None:
-            cv2.imshow("Object Tracking", tracker.draw_info(frame))
-            
-            key = cv2.waitKey(1) & 0xFF
-            
-            if key == ord('s'):
-                tracker.roi = tracker.select_roi(frame)
-                rx, ry, rw, rh = tracker.roi
-                tracker.roi_center = (rx + rw/2, ry + rh/2)
-            elif key == ord('q'):
-                logger.info("Quit command received")
-                break
+            if tracker.gui_available:
+                cv2.imshow("Object Tracking", tracker.draw_info(frame))
+                
+                key = cv2.waitKey(1) & 0xFF
+                
+                if key == ord('s'):
+                    tracker.roi = tracker.select_roi(frame)
+                    rx, ry, rw, rh = tracker.roi
+                    tracker.roi_center = (rx + rw/2, ry + rh/2)
+                elif key == ord('q'):
+                    logger.info("Quit command received")
+                    break
+            else:
+                # No GUI - auto-select first detected object
+                logger.info("No GUI available. Auto-selecting first detected object...")
+                detections = tracker.detect_objects(frame)
+                if detections:
+                    # Select first detection as ROI
+                    x1, y1, w, h = detections[0][0]
+                    cx, cy = x1 + w/2, y1 + h/2
+                    tracker.roi = (x1, y1, w, h)
+                    tracker.roi_center = (cx, cy)
+                    logger.info(f"Auto-selected object at center ({cx:.1f}, {cy:.1f})")
+                else:
+                    logger.info("No objects detected, continuing...")
+                    time.sleep(0.1)  # Brief pause
+                    continue
             
             continue
         
@@ -252,19 +336,43 @@ def main():
         tracker.update_fps()
         
         # Display
-        cv2.imshow("Object Tracking", frame)
-        
-        # Handle keys
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            logger.info("Quit command received")
-            break
-        elif key == ord('r'):
-            logger.info("Reset tracking")
-            tracker.selected_track_id = None
-            tracker.roi = None
-            tracker.roi_center = None
-            tracker.tracker = DeepSort(max_age=DEEPSORT_MAX_AGE, n_init=DEEPSORT_N_INIT)
+        if tracker.gui_available:
+            cv2.imshow("Object Tracking", frame)
+            
+            # Handle keys
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                logger.info("Quit command received")
+                break
+            elif key == ord('r'):
+                logger.info("Reset tracking")
+                tracker.selected_track_id = None
+                tracker.roi = None
+                tracker.roi_center = None
+                tracker.tracker = DeepSort(max_age=DEEPSORT_MAX_AGE, n_init=DEEPSORT_N_INIT)
+        else:
+            # No GUI - just log progress and check for quit signal
+            if frame_count % 30 == 0:  # Log every 30 frames (~1 second at 30fps)
+                logger.info(f"Processing frame {frame_count} - Tracking {len(tracks)} objects")
+            
+            # Check for quit (can't use cv2.waitKey without GUI)
+            try:
+                # Non-blocking check for keyboard input (limited in headless mode)
+                import msvcrt
+                if msvcrt.kbhit():
+                    key = msvcrt.getch()
+                    if key == b'q':
+                        logger.info("Quit command received")
+                        break
+                    elif key == b'r':
+                        logger.info("Reset tracking")
+                        tracker.selected_track_id = None
+                        tracker.roi = None
+                        tracker.roi_center = None
+                        tracker.tracker = DeepSort(max_age=DEEPSORT_MAX_AGE, n_init=DEEPSORT_N_INIT)
+            except ImportError:
+                # msvcrt not available on non-Windows
+                pass
     
     # Cleanup
     logger.info(f"Processed {frame_count} frames")
