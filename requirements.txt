@@ -1,0 +1,10 @@
+# Egyptian License Plate Tracker — Python requirements
+# Install with:  pip install -r requirements.txt
+
+ultralytics>=8.0.0        # YOLOv8
+opencv-python>=4.8.0      # webcam + drawing
+numpy>=1.24.0
+scipy>=1.10.0             # Hungarian algorithm for SORT
+filterpy>=1.4.5           # Kalman filter for SORT
+easyocr>=1.7.0            # Arabic + English OCR
+deep-sort-realtime        # DeepSORT implementation
